@@ -12,9 +12,11 @@ module Text.Markdown.SlamDown.Html
   , renderHTML
   , renderHalogen
   ) where
-    
+
+import Prelude
 import Data.Maybe
-import Data.Array (concat, map, concatMap, zipWith)
+import Data.Array (concat, concatMap)
+import Data.List (fromList, List(..), zipWith)
 import Data.String (joinWith)
 import Data.Foldable (foldMap)
 import Data.Identity
@@ -81,34 +83,34 @@ markdownToHtml st = renderHTML st <<< parseMd
 renderHTML :: SlamDownState -> SlamDown -> String
 renderHTML st = foldMap renderHTMLToString <<< renderHalogen_
   where
-  renderHalogen_ :: SlamDown -> [H.HTML (Maybe SlamDownEvent)]
+  renderHalogen_ :: SlamDown -> Array (H.HTML (Maybe SlamDownEvent))
   renderHalogen_ = renderHalogen st
   
 -- | Render the SlamDown AST to an arbitrary Halogen HTML representation
-renderHalogen :: forall f. (Alternative f) => SlamDownState -> SlamDown -> [H.HTML (f SlamDownEvent)]
-renderHalogen (SlamDownState m) (SlamDown bs) = map renderBlock bs
+renderHalogen :: forall f. (Alternative f) => SlamDownState -> SlamDown -> Array (H.HTML (f SlamDownEvent))
+renderHalogen (SlamDownState m) (SlamDown bs) = map renderBlock (fromList bs)
   where
   renderBlock :: Block -> H.HTML (f SlamDownEvent)
-  renderBlock (Paragraph is) = H.p_ (map renderInline is)
-  renderBlock (Header level is) = h_ level (map renderInline is)
+  renderBlock (Paragraph is) = H.p_ (map renderInline $ fromList is)
+  renderBlock (Header level is) = h_ level (map renderInline $ fromList is)
     where
-    h_ :: forall a. Number -> [H.HTML (f a)] -> H.HTML (f a)
+    h_ :: forall a. Int -> Array (H.HTML (f a)) -> H.HTML (f a)
     h_ 1 = H.h1_
     h_ 2 = H.h2_
     h_ 3 = H.h3_
     h_ 4 = H.h4_
     h_ 5 = H.h5_
     h_ 6 = H.h6_
-  renderBlock (Blockquote bs) = H.blockquote_ (map renderBlock bs)
-  renderBlock (List lt bss) = el_ lt (map item bss)
+  renderBlock (Blockquote bs) = H.blockquote_ (map renderBlock $ fromList bs)
+  renderBlock (Lst lt bss) = el_ lt (map item $ fromList bss)
     where
-    item :: [Block] -> H.HTML (f SlamDownEvent)
-    item bs = H.li_ (map renderBlock bs)
+    item :: List Block -> H.HTML (f SlamDownEvent)
+    item bs = H.li_ (map renderBlock $ fromList bs)
     
-    el_ :: forall a. ListType -> [H.HTML (f a)] -> H.HTML (f a)
+    el_ :: forall a. ListType -> Array (H.HTML (f a)) -> H.HTML (f a)
     el_ (Bullet _)  = H.ul_
     el_ (Ordered _) = H.ol_
-  renderBlock (CodeBlock _ ss) = H.pre_ [ H.code_ [ H.text (joinWith "\n" ss) ] ]
+  renderBlock (CodeBlock _ ss) = H.pre_ [ H.code_ [ H.text (joinWith "\n" $ fromList ss) ] ]
   renderBlock (LinkReference l url) = H.p_ [ H.text (l <> ": ")
                                            , H.a [ A.name l, A.id_ l, A.href url ] [ H.text url ]
                                            ]
@@ -120,20 +122,20 @@ renderHalogen (SlamDownState m) (SlamDown bs) = map renderBlock bs
   renderInline Space = H.text " "
   renderInline SoftBreak = H.text "\n"
   renderInline LineBreak = H.br_ []
-  renderInline (Emph is) = H.em_ (map renderInline is)
-  renderInline (Strong is) = H.strong_ (map renderInline is)
+  renderInline (Emph is) = H.em_ (map renderInline $ fromList is)
+  renderInline (Strong is) = H.strong_ (map renderInline $ fromList is)
   renderInline (Code _ c) = H.code_ [ H.text c ]
-  renderInline (Link body tgt) = H.a [ A.href (href tgt) ] (map renderInline body)
+  renderInline (Link body tgt) = H.a [ A.href (href tgt) ] (map renderInline $ fromList body)
     where
     href (InlineLink url) = url
     href (ReferenceLink tgt) = maybe "" ((<>) "#") tgt
-  renderInline (Image body url) = H.img [ A.src url ] (map renderInline body)
-  renderInline (FormField label req el) = H.label [ A.for label ] $ H.text label : requiredLabel (renderFormElement label el)
+  renderInline (Image body url) = H.img [ A.src url ] (map renderInline $ fromList body)
+  renderInline (FormField label req el) = H.label [ A.for label ] $ [H.text label] <> requiredLabel (renderFormElement label el)
     where
-    requiredLabel els | req = H.text "*" : els
+    requiredLabel els | req = [H.text "*"] <> els
                       | otherwise = els
                         
-  renderFormElement :: String -> FormField -> [H.HTML (f SlamDownEvent)]
+  renderFormElement :: String -> FormField -> Array (H.HTML (f SlamDownEvent))
   renderFormElement label (TextBox _ (Literal value)) = 
     [ H.input [ A.type_ "text"
               , A.id_ label
@@ -142,7 +144,7 @@ renderHalogen (SlamDownState m) (SlamDown bs) = map renderBlock bs
               , E.onInput (E.input (TextChanged label))
               ] [] ]
   renderFormElement label (RadioButtons (Literal def) (Literal ls)) = 
-    concatMap (\val -> radio (val == sel) val) (def : ls)
+    concatMap (\val -> radio (val == sel) val) (fromList (Cons def ls))
     where
     radio checked value =
       [ H.input [ A.checked checked
@@ -156,7 +158,7 @@ renderHalogen (SlamDownState m) (SlamDown bs) = map renderBlock bs
       ]
     sel = lookupTextValue label def
   renderFormElement label (CheckBoxes (Literal bs) (Literal ls)) = 
-    concat $ zipWith checkBox (lookupMultipleValues label bs ls) ls
+    (concat <<< fromList) $ zipWith checkBox (lookupMultipleValues label bs ls) ls
     where
     checkBox checked value =
       [ H.input [ A.checked checked
@@ -172,7 +174,7 @@ renderHalogen (SlamDownState m) (SlamDown bs) = map renderBlock bs
     [ H.select [ A.id_ label
                , A.name label
                , E.onInput (E.input (TextChanged label))
-               ] (map option ls) ]
+               ] (map option $ fromList ls) ]
     where
     sel' = lookupTextValue label sel
     option value = H.option [ A.selected (value == sel'), A.value value ] [ H.text value ]
@@ -184,7 +186,7 @@ renderHalogen (SlamDownState m) (SlamDown bs) = map renderBlock bs
       Just (SingleValue val) -> val
       _ -> def
       
-  lookupMultipleValues :: String -> [Boolean] -> [String] -> [Boolean]
+  lookupMultipleValues :: String -> List Boolean -> List String -> List Boolean
   lookupMultipleValues key def ls = 
     case M.lookup key m of
       Just (MultipleValues val) -> (`S.member` val) <$> ls

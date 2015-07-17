@@ -1,5 +1,6 @@
 module Main where
 
+import Prelude
 import Data.Void
 import Data.Tuple
 import Data.Either
@@ -56,7 +57,7 @@ ui = render <$> stateful (State "" emptySlamDownState) update
           , H.pre_ [ H.code_ [ H.text (show form) ] ]
           ] 
           
-  output :: String -> SlamDownState -> [H.HTML (f Input)]
+  output :: String -> SlamDownState -> Array (H.HTML (f Input))
   output md form = ((FormFieldChanged <$>) <$>) <$> renderHalogen form (parseMd md)
           
   update :: State -> Input -> State

@@ -1,8 +1,8 @@
 module Test.Main where
 
-import Debug.Trace
-
+import Prelude 
 import Data.Maybe
+import Data.List
 
 import qualified Data.Array as A
 import qualified Data.Char as S
@@ -11,7 +11,7 @@ import qualified Data.String as S
 import Data.Traversable (traverse)
 
 import Control.Monad.Eff   
-
+import Control.Monad.Eff.Console
 import Control.Monad.Eff.Random
 import Control.Monad.Trampoline
     
@@ -22,28 +22,23 @@ import Text.Markdown.SlamDown.Pretty
 import Test.StrongCheck
 import Test.StrongCheck.Gen
    
-foreign import exitFailure 
-  "function exitFailure() {\
-  \  process.exit();\
-  \}" :: forall eff a. Eff eff a   
+foreign import inPhantom :: forall e. Eff e Unit -> Eff e Unit
     
-testDocument :: forall eff. SlamDown -> Eff (trace :: Trace | eff) Unit
+testDocument :: forall eff. SlamDown -> Eff _ Unit
 testDocument sd = do
-  trace "Original: "
-  trace $ "  " <> show sd
+  log "Original: "
+  log $ "  " <> show sd
   
   let printed = prettyPrintMd sd
       parsed = parseMd printed
   
-  trace "Parsed: "
-  trace $ "  " <> show parsed
-  
-  if parsed == sd
-    then trace "Test passed"
-    else do trace "Test failed" 
-            exitFailure
-    
-main = do
+  log "Parsed: "
+  log $ "  " <> show parsed
+
+  assert (parsed == sd <?> "Test failed")
+
+static :: Eff _ Unit 
+static = do
   testDocument $ parseMd "Paragraph"
   testDocument $ parseMd "Paragraph with spaces"
   testDocument $ parseMd "Paragraph with an entity: &copy;"
@@ -106,30 +101,30 @@ main = do
                          \   1. Item 3"
   testDocument $ parseMd "Some indented code:\n\
                          \\n\
-                         \    import Debug.Trace\n\
+                         \    import Debug.Log\n\
                          \    \n\
-                         \    main = trace \"Hello World\""
+                         \    main = log \"Hello World\""
   testDocument $ parseMd "Some fenced code:\n\
                          \\n\
                          \```purescript\n\
-                         \import Debug.Trace\n\
+                         \import Debug.Log\n\
                          \\n\
-                         \main = trace \"Hello World\"\n\
+                         \main = log \"Hello World\"\n\
                          \```"
   testDocument $ parseMd "Some fenced code which can be evaluated:\n\
                          \\n\
                          \!~~~purescript\n\
-                         \import Debug.Trace\n\
+                         \import Debug.Log\n\
                          \\n\
-                         \main = trace \"Hello World\"\n\
+                         \main = log \"Hello World\"\n\
                          \~~~"
   testDocument $ eval (\_ _ -> "Evaluated!")
                $ parseMd "Some evaluated fenced code:\n\
                          \\n\
                          \!~~~purescript\n\
-                         \import Debug.Trace\n\
+                         \import Debug.Log\n\
                          \\n\
-                         \main = trace \"Hello World\"\n\
+                         \main = log \"Hello World\"\n\
                          \~~~"
   testDocument $ parseMd "name = __ (Phil Freeman)"
   testDocument $ parseMd "name = __ (!`name`)"
@@ -146,45 +141,47 @@ main = do
   testDocument $ parseMd "start = __ - __ - ____ __ : __ (06-06-2015 12:00 PM)"
   testDocument $ parseMd "start = __ - __ - ____ __ : __ (!`...`)"
   
-  trace "All static tests passed!"
-  
-  trace "Some random documents:"
-  
+  log "All static tests passed!"
+
+generated :: Eff _ Unit 
+generated = do
+  log "Random documents"
   seed <- random
   let docs = runTrampoline $ sample' 10 (GenState { size: 10, seed: seed }) (prettyPrintMd <$> arbitrary)
-  traverse trace docs
-  
-  quickCheck' 1000 \sd -> 
+  traverse log docs
+
+  quickCheck' 100 \sd -> 
     let printed = prettyPrintMd sd
         parsed = parseMd printed
     in parsed == sd <?> "Pretty printer and parser incompatible for document: " <>
-                        "\nOriginal: " <> show sd <>
-                        "\nPrinted: " <> printed <> 
-                        "\nParsed: " <> show parsed
-  
+      "\nOriginal: " <> show sd <>
+      "\nPrinted: " <> printed <>
+      "\nParsed: " <> show parsed
+  log "All dynamic passed"
+
 deferGen :: forall a. (Unit -> Gen a) -> Gen a
 deferGen g = do
   u <- pure unit
   g u   
 
-tinyArrayOf :: forall a. Gen a -> Gen [a]
+tinyArrayOf :: forall a. Gen a -> Gen (Array a)
 tinyArrayOf g = do
-  len <- chooseInt 0 1
+  len <- chooseInt 0.0 1.0
   vectorOf len g  
   
-smallArrayOf :: forall a. Gen a -> Gen [a]
+smallArrayOf :: forall a. Gen a -> Gen (Array a)
 smallArrayOf g = do
-  len <- chooseInt 1 2
+  len <- chooseInt 1.0 2.0
   vectorOf len g  
   
 instance arbSlamDown :: Arbitrary SlamDown where
-  arbitrary = SlamDown <$> blocks
+  arbitrary = (SlamDown <<< toList) <$> blocks
   
-three :: forall a. a -> a -> a -> [a] 
+three :: forall a. a -> a -> a -> Array a
 three a b c = [a, b, c]  
   
   
-blocks :: Gen [Block]
+blocks :: Gen (Array Block)
 blocks = oneOf (smallArrayOf block0)
                [ A.singleton <$> bq
                , A.singleton <$> list
@@ -192,40 +189,42 @@ blocks = oneOf (smallArrayOf block0)
                ]
   where
   block0 :: Gen Block
-  block0 = oneOf (Paragraph <$> inlines) 
-                 [ Header <$> chooseInt 1 6 <*> (A.singleton <$> simpleText)
-                 , CodeBlock <$> (Fenced <$> elements true [false] <*> alphaNum)
-                             <*> smallArrayOf alphaNum
+  block0 = oneOf (Paragraph <<< toList <$> inlines) 
+                 [ Header <$> chooseInt 1.0 6.0 <*> (singleton <$> simpleText)
+                 , CodeBlock <$>
+                   (Fenced <$> (elements true (singleton false)) <*>
+                    alphaNum)
+                   <*> (toList <$> smallArrayOf alphaNum)
                  , LinkReference <$> alphaNum <*> alphaNum
                  , pure Rule
                  ]
                  
   bq :: Gen Block
-  bq = Blockquote <$> (A.singleton <$> block0)
+  bq = Blockquote <$> (singleton <$> block0)
   
   cb :: Gen Block
-  cb = CodeBlock Indented <$> smallArrayOf alphaNum
+  cb = (CodeBlock Indented <<< toList) <$> smallArrayOf alphaNum
   
   list :: Gen Block
-  list = List <$> oneOf (Bullet <$> elements "-" ["+", "*"])
-                        [ Ordered <$> elements ")" ["."] ]
-              <*> tinyArrayOf (tinyArrayOf block0)
+  list = Lst <$> oneOf (Bullet <$> (elements "-" $ toList ["+", "*"]))
+                        [ Ordered <$> (elements ")" $ singleton ".")]
+              <*> (toList <$> tinyArrayOf (toList <$> (tinyArrayOf block0)))
 
-inlines :: Gen [Inline]
+inlines :: Gen (Array Inline)
 inlines = oneOf inlines0 [ A.singleton <$> link
                          , A.singleton <$> formField
                          ]
   where
-  inlines0 :: Gen [Inline]
+  inlines0 :: Gen (Array Inline)
   inlines0 = oneOf (A.singleton <$> simpleText)
                   [ three <$> simpleText 
-                          <*> elements Space [SoftBreak, LineBreak] 
+                          <*> (elements Space $ toList [SoftBreak, LineBreak])
                           <*> simpleText
-                  , A.singleton <$> (Code <$> elements true [false] <*> alphaNum)
+                  , A.singleton <$> (Code <$> (elements true (singleton false)) <*> alphaNum)
                   ]
   
   link :: Gen Inline
-  link = Link <$> inlines0 <*> linkTarget
+  link = Link <$> (toList <$> inlines0) <*> linkTarget
   
   linkTarget :: Gen LinkTarget
   linkTarget = oneOf (InlineLink <$> alphaNum)
@@ -233,11 +232,11 @@ inlines = oneOf inlines0 [ A.singleton <$> link
   
   formField :: Gen Inline
   formField = FormField <$> alphaNum
-                        <*> elements true [false] 
+                        <*> elements true (singleton false)
                         <*> formElement
   
   formElement :: Gen FormField
-  formElement = TextBox <$> elements PlainText [Date, Time, DateTime] 
+  formElement = TextBox <$> (elements PlainText $ toList [Date, Time, DateTime])
                         <*> (Literal <$> alphaNum)
 
 simpleText :: Gen Inline
@@ -245,5 +244,12 @@ simpleText = Str <$> alphaNum
 
 alphaNum :: Gen String
 alphaNum = do
-  len <- chooseInt 5 10
-  S.fromCharArray <$> vectorOf len (elements (S.fromCharCode 97) (S.toCharArray "qwertyuioplkjhgfdszxcvbnm123457890"))
+  len <- chooseInt 5.0 10.0
+  S.fromCharArray <$> vectorOf len (elements (S.fromCharCode 97) $ toList (S.toCharArray "qwertyuioplkjhgfdszxcvbnm123457890"))
+
+
+main :: Eff _ Unit 
+main = inPhantom do
+  static 
+  generated
+  

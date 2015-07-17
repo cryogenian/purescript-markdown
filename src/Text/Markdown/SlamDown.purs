@@ -1,34 +1,34 @@
 module Text.Markdown.SlamDown where
 
-import Data.Array (map)
+import Prelude
 import Data.Maybe
 import Data.Monoid
 import Data.Function (on)
+import Data.List 
 
-data SlamDown = SlamDown [Block]
+data SlamDown = SlamDown (List Block)
 
 instance showSlamDown :: Show SlamDown where
   show (SlamDown bs) = "(SlamDown " ++ show bs ++ ")"
   
 instance eqSlamDown :: Eq SlamDown where
-  (==) = (==) `on` show
-  (/=) = (/=) `on` show
+  eq = eq `on` show
   
 instance ordSlamDown :: Ord SlamDown where
   compare = compare `on` show  
   
 instance semigroupSlamDown :: Semigroup SlamDown where
-  (<>) (SlamDown bs1) (SlamDown bs2) = SlamDown (bs1 <> bs2)
+  append (SlamDown bs1) (SlamDown bs2) = SlamDown (bs1 <> bs2)
   
 instance monoidSlamDown :: Monoid SlamDown where
-  mempty = SlamDown []
+  mempty = SlamDown mempty
 
 data Block
-  = Paragraph [Inline]
-  | Header Number [Inline]   
-  | Blockquote [Block]  
-  | List ListType [[Block]]  
-  | CodeBlock CodeBlockType [String] 
+  = Paragraph (List Inline)
+  | Header Int (List Inline)
+  | Blockquote (List Block)
+  | Lst ListType (List (List Block))
+  | CodeBlock CodeBlockType (List String)
   | LinkReference String String
   | Rule
 
@@ -36,7 +36,7 @@ instance showBlock :: Show Block where
   show (Paragraph is)        = "(Paragraph " ++ show is ++ ")"
   show (Header n is)         = "(Header " ++ show n ++ " " ++ show is ++ ")"
   show (Blockquote bs)       = "(Blockquote " ++ show bs ++ ")"
-  show (List lt bss)         = "(List " ++ show lt ++ " " ++ show bss ++ ")"
+  show (Lst lt bss)         = "(Lst " ++ show lt ++ " " ++ show bss ++ ")"
   show (CodeBlock ca s)      = "(CodeBlock " ++ show ca ++ " " ++ show s ++ ")"
   show (LinkReference l uri) = "(LinkReference " ++ show l ++ " " ++ show uri ++ ")"
   show Rule                  = "Rule"
@@ -47,11 +47,11 @@ data Inline
   | Space
   | SoftBreak  
   | LineBreak  
-  | Emph [Inline]  
-  | Strong [Inline] 
+  | Emph (List Inline)
+  | Strong (List Inline)
   | Code Boolean String
-  | Link [Inline] LinkTarget   
-  | Image [Inline] String
+  | Link (List Inline) LinkTarget   
+  | Image (List Inline) String
   | FormField String Boolean FormField
 
 instance showInline :: Show Inline where
@@ -74,10 +74,10 @@ instance showListType :: Show ListType where
   show (Ordered s)  = "(Ordered " ++ show s ++ ")"
 
 instance eqListType :: Eq ListType where
-  (==) (Bullet s1)  (Bullet s2)  = s1 == s2
-  (==) (Ordered s1) (Ordered s2) = s1 == s2
-  (==) _            _            = false
-  (/=) x            y            = not (x == y)
+  eq (Bullet s1)  (Bullet s2)  = s1 == s2
+  eq (Ordered s1) (Ordered s2) = s1 == s2
+  eq _            _            = false
+
 
 data CodeBlockType 
   = Indented
@@ -105,9 +105,9 @@ instance showExpr :: (Show a) => Show (Expr a) where
  
 data FormField
   = TextBox        TextBoxType (Expr String)
-  | RadioButtons   (Expr String) (Expr [String])
-  | CheckBoxes     (Expr [Boolean]) (Expr [String])
-  | DropDown       (Expr [String]) (Expr String)
+  | RadioButtons   (Expr String) (Expr (List String))
+  | CheckBoxes     (Expr (List Boolean)) (Expr (List String))
+  | DropDown       (Expr (List String)) (Expr String)
   
 instance showFormField :: Show FormField where
   show (TextBox ty def) = "(TextBox " ++ show ty ++ " " ++ show def ++ ")"
@@ -130,7 +130,7 @@ everywhere b i (SlamDown bs) = SlamDown (map b' bs)
   b' (Paragraph is) = b (Paragraph (map i' is))
   b' (Header n is) = b (Header n (map i' is))
   b' (Blockquote bs) = b (Blockquote (map b' bs))
-  b' (List lt bss) = b (List lt (map (map b') bss))
+  b' (Lst lt bss) = b (Lst lt (map (map b') bss))
   b' other = b other
   
   i' :: Inline -> Inline
@@ -140,13 +140,13 @@ everywhere b i (SlamDown bs) = SlamDown (map b' bs)
   i' (Image is uri)   = i (Image (map i' is) uri)
   i' other = i other
 
-eval :: (Maybe String -> [String] -> String) -> SlamDown -> SlamDown
+eval :: (Maybe String -> List String -> String) -> SlamDown -> SlamDown
 eval f = everywhere b i
   where
   b :: Block -> Block
-  b (CodeBlock (Fenced true info) code) = CodeBlock (Fenced false info) [f (Just info) code]
+  b (CodeBlock (Fenced true info) code) = CodeBlock (Fenced false info) (singleton $ f (Just info) code)
   b other = other
 
   i :: Inline -> Inline
-  i (Code true code) = Code false (f Nothing [code])
+  i (Code true code) = Code false (f Nothing $ singleton code)
   i other = other

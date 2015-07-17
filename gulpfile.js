@@ -1,103 +1,111 @@
 'use strict'
 
-var gulp        = require('gulp')
-  , purescript  = require('gulp-purescript')
-  , browserify  = require('gulp-browserify')
-  , run         = require('gulp-run')
-  , runSequence = require('run-sequence')
-  , jsValidate  = require('gulp-jsvalidate')
-  ;
+var gulp = require('gulp'),
+    purescript = require('gulp-purescript'),
+    browserify = require('gulp-browserify'),
+    run = require('gulp-run'),
+    runSequence = require('run-sequence'),
+    plumber = require('gulp-plumber'),
+    buffer = require('vinyl-buffer'),
+    source = require('vinyl-source-stream');
 
-var paths = {
-    src: 'src/**/*.purs',
-    bowerSrc: [
-      'bower_components/purescript-*/src/**/*.purs',
-      'bower_components/purescript-*/src/**/*.purs.hs'
-    ],
-    dest: '',
-    docs: {
-        'Text.Markdown.SlamDown': {
-            dest: 'docs/README.md',
-            src: [
-              'src/Text/Markdown/SlamDown.purs',
-              'src/Text/Markdown/SlamDown/Parser.purs',
-              'src/Text/Markdown/SlamDown/Pretty.purs',
-              'src/Text/Markdown/SlamDown/Html.purs'
-            ]
-        }
-    },
-    exampleSrc: 'example/Main.purs',
-    test: 'test/**/*.purs'
-};
-
-var options = {
-    test: {
-        main: 'Test.Main',
-        output: 'output/test.js'
-    }, 
-    example: {
-        main: 'Main',
-        modules: ['Main']
-    }
-};
-
-function compile (compiler, src, opts) {
-    var psc = compiler(opts);
-    psc.on('error', function(e) {
-        console.error(e.message);
-        psc.end();
-    });
-    return gulp.src(src.concat(paths.bowerSrc))
-        .pipe(psc)
-        .pipe(jsValidate());
-};
-
-function docs (target) {
-    return function() {
-        var docgen = purescript.docgen();
-        docgen.on('error', function(e) {
-            console.error(e.message);
-            docgen.end();
-        });
-        return gulp.src(paths.docs[target].src)
-            .pipe(docgen)
-            .pipe(gulp.dest(paths.docs[target].dest));
-    }
-}
 
 function sequence () {
     var args = [].slice.apply(arguments);
     return function() {
         runSequence.apply(null, args);
-    }
+    };
 }
 
-gulp.task('browser', function() {
-    return compile(purescript.psc, [paths.src, paths.exampleSrc].concat(paths.bowerSrc), options.example)
-        .pipe(browserify({}))
-        .pipe(gulp.dest('example'))
+var sources = [
+    'src/**/*.purs',
+    'bower_components/purescript-*/src/**/*.purs'
+];
+var foreigns = [
+    'src/**/*.js',
+    'bower_components/purescript-*/src/**/*.js'
+];
+
+var testSources = [
+    'test/src/**/*.purs'
+];
+var testForeigns = [
+    'test/src/**/*.js'
+];
+
+var exampleSources = [
+    'example/src/**/*.purs'
+];
+
+var exampleForeigns = [
+    'example/src/**/*.js'
+];
+
+gulp.task('docs', function() {
+    return purescript.pscDocs({
+        src: sources,
+        docgen: {
+            "Text.Markdown.SlamDown": "docs/Text/Markdown/SlamDown.md",
+            "Text.Markdown.SlamDown.Parser": "docs/Text/Markdown/SlamDown/Parser.md",
+            "Text.Markdown.SlamDown.Pretty": "docs/Text/Markdown/SlamDown/Pretty.md",
+            "Text.Markdown.SlamDown.Html": "docs/Text/Markdown/SlamDown/Html.md"
+        }
+    });
 });
+
 
 gulp.task('make', function() {
-    return compile(purescript.pscMake, [paths.src].concat(paths.bowerSrc), {})
-        .pipe(gulp.dest(paths.dest))
+    return purescript.psc({
+        src: sources,
+        ffi: foreigns
+    });
 });
 
-gulp.task('test', function() {
-    return compile(purescript.psc, [paths.src, paths.test].concat(paths.bowerSrc), options.test)
-        .pipe(run('node').exec());
+gulp.task('test-make', function() {
+    return purescript.psc({
+        src: sources.concat(testSources),
+        ffi: foreigns.concat(testForeigns)
+    });
 });
 
-gulp.task('Text.Markdown.SlamDown', docs('Text.Markdown.SlamDown'));
-
-gulp.task('docs', ['Text.Markdown.SlamDown']);
-
-gulp.task('watch-browser', function() {
-    gulp.watch(paths.src, sequence('browser', 'docs'));
+gulp.task('example-make', function() {
+    return purescript.psc({
+        src: sources.concat(exampleSources),
+        ffi: foreigns.concat(exampleForeigns)
+    });
 });
 
-gulp.task('watch-make', function() {
-    gulp.watch(paths.src, sequence('make', 'docs'));
+
+gulp.task('test-bundle',['test-make'], function () {
+    return purescript.pscBundle({
+        src: 'output/**/*.js',
+        main: 'Test.Main',
+        output: 'dist/test.js'
+    });
 });
 
-gulp.task('default', sequence('make', 'docs', 'browser'));
+gulp.task('example-bundle', ['example-make'], function() {
+    return purescript.pscBundle({
+        src: 'output/**/*.js',
+        main: 'Main',
+        output: 'dist/example.js'
+    });
+});
+
+gulp.task('example', ['example-bundle'], function() {
+    return browserify({
+        entries: ['dist/example.js'],
+        paths: ['node_modules']
+    }).bundle()
+        .pipe(plumber())
+        .pipe(source('psc.js'))
+        .pipe(buffer())
+        .pipe(gulp.dest('example'));
+});
+
+gulp.task('test', ['test-bundle'], function() {
+    run('node_modules/phantomjs/bin/phantomjs dist/test.js').exec();
+});
+
+
+gulp.task('default', sequence('make', 'docs'));
